@@ -28,12 +28,13 @@ export WIN_UCRT_REDIST_DIR="/c/Program Files (x86)/Windows Kits/10/Redist/ucrt/D
 elif test `uname -s` = Linux; then
 export CC=clang
 export CXX=clang++
-ac_add_options --enable-optimize
+ac_add_options --enable-optimize="-O2 -msse3 -march=x86-64 -mtune=generic -w"
 ac_add_options --enable-eme=widevine
 ac_add_options --target=x86_64-pc-linux-gnu
 ac_add_options --enable-pulseaudio
 ac_add_options --enable-alsa
-ac_add_options --disable-stylo
+ac_add_options --enable-rust-simd # on x86 requires SSE2
+ac_add_options --enable-stylo=build
 fi
 
 export MOZ_GECKO_PROFILER=
@@ -62,7 +63,7 @@ ac_add_options --enable-release
 ac_add_options --enable-update-channel=release
 ac_add_options --enable-updater
 
-ac_add_options --with-app-name=waterfox
-ac_add_options --with-app-basename=Waterfox
+ac_add_options --with-app-name=roam
+ac_add_options --with-app-basename=Roam
 ac_add_options --with-branding=browser/branding/unofficial
-ac_add_options --with-distribution-id=org.waterfoxproject
+ac_add_options --with-distribution-id=org.oogle
