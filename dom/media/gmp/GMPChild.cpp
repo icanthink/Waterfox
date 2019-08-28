@@ -9,9 +9,11 @@
 #include "GMPLoader.h"
 #include "GMPVideoDecoderChild.h"
 #include "GMPVideoEncoderChild.h"
-#include "GMPDecryptorChild.h"
 #include "GMPVideoHost.h"
 #include "nsDebugImpl.h"
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#endif
 #include "nsIFile.h"
 #include "nsXULAppAPI.h"
 #include "gmp-video-decode.h"
@@ -23,7 +25,6 @@
 #include "prio.h"
 #include "base/task.h"
 #include "base/command_line.h"
-#include "widevine-adapter/WidevineAdapter.h"
 #include "ChromiumCDMAdapter.h"
 #include "GMPLog.h"
 
@@ -74,23 +75,23 @@ GetFileBase(const nsAString& aPluginPath,
 {
   nsresult rv = NS_NewLocalFile(aPluginPath,
                                 true, getter_AddRefs(aFileBase));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
-  if (NS_FAILED(aFileBase->Clone(getter_AddRefs(aLibDirectory)))) {
+  if (NS_WARN_IF(NS_FAILED(aFileBase->Clone(getter_AddRefs(aLibDirectory))))) {
     return false;
   }
 
   nsCOMPtr<nsIFile> parent;
   rv = aFileBase->GetParent(getter_AddRefs(parent));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
   nsAutoString parentLeafName;
   rv = parent->GetLeafName(parentLeafName);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
@@ -129,7 +130,7 @@ GetPluginFile(const nsAString& aPluginPath,
   return GetPluginFile(aPluginPath, unusedlibDir, aLibFile);
 }
 
-#if defined(XP_MACOSX) && defined(MOZ_GMP_SANDBOX)
+#if defined(XP_MACOSX)
 static nsCString
 GetNativeTarget(nsIFile* aFile)
 {
@@ -144,6 +145,7 @@ GetNativeTarget(nsIFile* aFile)
   return path;
 }
 
+#if defined(MOZ_GMP_SANDBOX)
 static bool
 GetPluginPaths(const nsAString& aPluginPath,
                nsCString &aPluginDirectoryPath,
@@ -187,12 +189,12 @@ GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath)
   nsCOMPtr<nsIFile> app, appBinary;
   nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appPath),
                                 true, getter_AddRefs(app));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
   rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(appBinaryPath),
                        true, getter_AddRefs(appBinary));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
@@ -232,7 +234,8 @@ GMPChild::SetMacSandboxInfo(MacSandboxPluginType aPluginType)
   mGMPLoader->SetSandboxInfo(&info);
   return true;
 }
-#endif // XP_MACOSX && MOZ_GMP_SANDBOX
+#endif // MOZ_GMP_SANDBOX
+#endif // XP_MACOSX
 
 bool
 GMPChild::Init(const nsAString& aPluginPath,
@@ -313,8 +316,8 @@ GMPChild::ResolveLinks(nsCOMPtr<nsIFile>& aPath)
 #elif defined(XP_MACOSX)
   nsCString targetPath = GetNativeTarget(aPath);
   nsCOMPtr<nsIFile> newFile;
-  if (NS_FAILED(
-        NS_NewNativeLocalFile(targetPath, true, getter_AddRefs(newFile)))) {
+  if (NS_WARN_IF(NS_FAILED(
+        NS_NewNativeLocalFile(targetPath, true, getter_AddRefs(newFile))))) {
     return false;
   }
   aPath = newFile;
@@ -375,7 +378,7 @@ GetFirefoxAppPath(nsCOMPtr<nsIFile> aPluginContainerPath,
   nsCOMPtr<nsIFile> path = aPluginContainerPath;
   for (int i = 0; i < 4; i++) {
     nsCOMPtr<nsIFile> parent;
-    if (NS_FAILED(path->GetParent(getter_AddRefs(parent)))) {
+    if (NS_WARN_IF(NS_FAILED(path->GetParent(getter_AddRefs(parent))))) {
       return false;
     }
     path = parent;
@@ -402,7 +405,7 @@ GetSigPath(const int aRelativeLayers,
   nsCOMPtr<nsIFile> path = aExecutablePath;
   for (int i = 0; i < aRelativeLayers; i++) {
     nsCOMPtr<nsIFile> parent;
-    if (NS_FAILED(path->GetParent(getter_AddRefs(parent)))) {
+    if (NS_WARN_IF(NS_FAILED(path->GetParent(getter_AddRefs(parent))))) {
       return false;
     }
     path = parent;
@@ -555,7 +558,21 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
 
   nsCString libPath;
   if (!GetUTF8LibPath(libPath)) {
-    return IPC_FAIL_NO_REASON(this);
+    #ifdef MOZ_CRASHREPORTER
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("GMPLibraryPath"),
+                                       NS_ConvertUTF16toUTF8(mPluginPath));
+    #endif
+
+#ifdef XP_WIN
+    return IPC_FAIL(
+      this,
+      nsPrintfCString("Failed to get lib path with error(%d).", GetLastError())
+        .get());
+#else
+    return IPC_FAIL(
+      this,
+      "Failed to get lib path.");
+#endif
   }
 
   auto platformAPI = new GMPPlatformAPI();
@@ -566,28 +583,27 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
   if (!mGMPLoader->CanSandbox()) {
     LOGD("%s Can't sandbox GMP, failing", __FUNCTION__);
     delete platformAPI;
-    return IPC_FAIL_NO_REASON(this);
+    return IPC_FAIL(this, "Can't sandbox GMP.");
   }
 #endif
-
-  bool isWidevine = aAdapter.EqualsLiteral("widevine");
   bool isChromium = aAdapter.EqualsLiteral("chromium");
 #if defined(MOZ_GMP_SANDBOX) && defined(XP_MACOSX)
   MacSandboxPluginType pluginType = MacSandboxPluginType_GMPlugin_Default;
-  if (isWidevine || isChromium) {
+  if (isChromium) {
     pluginType = MacSandboxPluginType_GMPlugin_EME_Widevine;
   }
   if (!SetMacSandboxInfo(pluginType)) {
     NS_WARNING("Failed to set Mac GMP sandbox info");
     delete platformAPI;
-    return IPC_FAIL_NO_REASON(this);
+    return IPC_FAIL(
+      this,
+      nsPrintfCString("Failed to set Mac GMP sandbox info with plugin type %d.",
+                      pluginType).get());
   }
 #endif
 
   GMPAdapter* adapter = nullptr;
-  if (isWidevine) {
-    adapter = new WidevineAdapter();
-  } else if (isChromium) {
+  if (isChromium) {
     auto&& paths = MakeCDMHostVerificationPaths();
     GMP_LOG("%s CDM host paths=%s", __func__, ToCString(paths).get());
     adapter = new ChromiumCDMAdapter(Move(paths));
@@ -599,7 +615,21 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
                         adapter)) {
     NS_WARNING("Failed to load GMP");
     delete platformAPI;
-    return IPC_FAIL_NO_REASON(this);
+    #ifdef MOZ_CRASHREPORTER
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("GMPLibraryPath"),
+                                       NS_ConvertUTF16toUTF8(mPluginPath));
+    #endif
+
+#ifdef XP_WIN
+    return IPC_FAIL(
+      this,
+      nsPrintfCString("Failed to load GMP with error(%d).", GetLastError())
+        .get());
+#else
+    return IPC_FAIL(
+      this,
+      "Failed to load GMP.");
+#endif
   }
 
   return IPC_OK();
@@ -638,21 +668,25 @@ GMPChild::ActorDestroy(ActorDestroyReason aWhy)
 void
 GMPChild::ProcessingError(Result aCode, const char* aReason)
 {
+  if (!aReason) {
+    aReason = "";
+  }
+
   switch (aCode) {
     case MsgDropped:
       _exit(0); // Don't trigger a crash report.
     case MsgNotKnown:
-      MOZ_CRASH("aborting because of MsgNotKnown");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgNotKnown, reason(%s)", aReason);
     case MsgNotAllowed:
-      MOZ_CRASH("aborting because of MsgNotAllowed");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgNotAllowed, reason(%s)", aReason);
     case MsgPayloadError:
-      MOZ_CRASH("aborting because of MsgPayloadError");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgPayloadError, reason(%s)", aReason);
     case MsgProcessingError:
-      MOZ_CRASH("aborting because of MsgProcessingError");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgProcessingError, reason(%s)", aReason);
     case MsgRouteError:
-      MOZ_CRASH("aborting because of MsgRouteError");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgRouteError, reason(%s)", aReason);
     case MsgValueError:
-      MOZ_CRASH("aborting because of MsgValueError");
+      MOZ_CRASH_UNSAFE_PRINTF("aborting because of MsgValueError, reason(%s)", aReason);
     default:
       MOZ_CRASH("not reached");
   }

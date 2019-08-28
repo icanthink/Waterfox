@@ -7,15 +7,15 @@
 #ifndef ChromiumCDMProxy_h_
 #define ChromiumCDMProxy_h_
 
-#include "mozilla/CDMProxy.h"
 #include "mozilla/AbstractThread.h"
+#include "mozilla/CDMProxy.h"
 #include "ChromiumCDMParent.h"
 
 namespace mozilla {
 
 class MediaRawData;
 class DecryptJob;
-
+class ChromiumCDMCallbackProxy;
 class ChromiumCDMProxy : public CDMProxy
 {
 public:
@@ -24,9 +24,8 @@ public:
   ChromiumCDMProxy(dom::MediaKeys* aKeys,
                    const nsAString& aKeySystem,
                    GMPCrashHelper* aCrashHelper,
-                   bool aAllowDistinctiveIdentifier,
-                   bool aAllowPersistentState,
-                   nsIEventTarget* aMainThread);
+                   bool aAllowDistinctiveIdentifier, bool aAllowPersistentState,
+                   nsISerialEventTarget* aMainThread);
 
   void Init(PromiseId aPromiseId,
             const nsAString& aOrigin,
@@ -68,10 +67,10 @@ public:
 
   void OnSessionMessage(const nsAString& aSessionId,
                         dom::MediaKeyMessageType aMessageType,
-                        nsTArray<uint8_t>& aMessage) override;
+                        const nsTArray<uint8_t>& aMessage) override;
 
   void OnExpirationChange(const nsAString& aSessionId,
-                          GMPTimestamp aExpiryTime) override;
+                          UnixTime aExpiryTime) override;
 
   void OnSessionClosed(const nsAString& aSessionId) override;
 
@@ -98,12 +97,12 @@ public:
 
   const nsString& KeySystem() const override;
 
-  CDMCaps& Capabilites() override;
+  DataMutex<CDMCaps>& Capabilites() override;
 
   void OnKeyStatusesChange(const nsAString& aSessionId) override;
 
-  void GetSessionIdsForKeyId(const nsTArray<uint8_t>& aKeyId,
-                             nsTArray<nsCString>& aSessionIds) override;
+  void GetStatusForPolicy(PromiseId aPromiseId,
+                          const nsAString& aMinHdcpVersion) override;
 
 #ifdef DEBUG
   bool IsOnOwnerThread() override;
@@ -115,18 +114,27 @@ public:
   // CDM, which will fail on all operations.
   already_AddRefed<gmp::ChromiumCDMParent> GetCDMParent();
 
+  void OnResolvePromiseWithKeyStatus(uint32_t aPromiseId,
+                                     dom::MediaKeyStatus aKeyStatus);
+
 private:
   void OnCDMCreated(uint32_t aPromiseId);
+  void ShutdownCDMIfExists();
 
   ~ChromiumCDMProxy();
+
+  // True if Shutdown() has been called. Should only be read and written on
+  // main thread.
+  bool mIsShutdown = false;
 
   GMPCrashHelper* mCrashHelper;
 
   Mutex mCDMMutex;
   RefPtr<gmp::ChromiumCDMParent> mCDM;
   RefPtr<AbstractThread> mGMPThread;
+  UniquePtr<ChromiumCDMCallbackProxy> mCallback;
 };
 
 } // namespace mozilla
 
-#endif // GMPCDMProxy_h_
+#endif // ChromiumCDMProxy_h_

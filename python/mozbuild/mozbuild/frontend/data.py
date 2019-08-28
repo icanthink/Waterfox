@@ -23,6 +23,8 @@ from mozpack.chrome.manifest import ManifestEntry
 import mozpack.path as mozpath
 from .context import FinalTargetValue
 
+from collections import defaultdict, OrderedDict
+
 from ..util import (
     group_unified_files,
 )
@@ -156,6 +158,30 @@ class VariablePassthru(ContextDerived):
     def __init__(self, context):
         ContextDerived.__init__(self, context)
         self.variables = {}
+
+
+class ComputedFlags(ContextDerived):
+    """Aggregate flags for consumption by various backends.
+    """
+    __slots__ = ('flags',)
+
+    def __init__(self, context, reader_flags):
+        ContextDerived.__init__(self, context)
+        self.flags = reader_flags
+
+    def resolve_flags(self, key, value):
+        # Bypass checks done by CompileFlags that would keep us from
+        # setting a value here.
+        dict.__setitem__(self.flags, key, value)
+
+    def get_flags(self):
+        flags = defaultdict(list)
+        for key, _, dest_vars in self.flags.flag_variables:
+            value = self.flags.get(key)
+            if value:
+                for dest_var in dest_vars:
+                    flags[dest_var].extend(value)
+        return flags.items()
 
 class XPIDLFile(ContextDerived):
     """Describes an XPIDL file to be compiled."""
@@ -1086,3 +1112,13 @@ class ChromeManifestEntry(ContextDerived):
         entry = entry.rebase(mozpath.dirname(manifest_path))
         # Then add the install_target to the entry base directory.
         self.entry = entry.move(mozpath.dirname(self.path))
+
+
+class GnProjectData(ContextDerived):
+    def __init__(self, context, target_dir, gn_dir_attrs, non_unified_sources):
+        ContextDerived.__init__(self, context)
+        self.target_dir = target_dir
+        self.non_unified_sources = non_unified_sources
+        self.gn_input_variables = gn_dir_attrs.variables
+        self.gn_sandbox_variables = gn_dir_attrs.sandbox_vars
+        self.mozilla_flags = gn_dir_attrs.mozilla_flags

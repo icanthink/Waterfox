@@ -33,9 +33,9 @@ with Files('GetUserMedia*'):
 DIRS += [
     'eme',
     'encoder',
+    'fake-cdm',
     'flac',
     'gmp',
-    'gmp-plugin',
     'gmp-plugin-openh264',
     'imagecapture',
     'ipc',
@@ -64,11 +64,6 @@ if CONFIG['MOZ_WEBRTC']:
 
 TEST_DIRS += [
     'gtest',
-]
-
-MOCHITEST_MANIFESTS += [
-    'test/mochitest.ini',
-    'tests/mochitest/identity/mochitest.ini',
 ]
 
 if CONFIG['MOZ_WEBRTC']:

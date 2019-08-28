@@ -5,14 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EMEDecoderModule.h"
-#include "EMEVideoDecoder.h"
 #include "GMPDecoderModule.h"
 #include "GMPService.h"
 #include "MP4Decoder.h"
 #include "MediaInfo.h"
 #include "MediaPrefs.h"
 #include "PDMFactory.h"
-#include "gmp-decryption.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/CDMProxy.h"
 #include "mozilla/EMEUtils.h"
@@ -94,10 +92,6 @@ public:
       mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
       return;
     }
-
-    nsAutoPtr<MediaRawDataWriter> writer(aSample->CreateWriter());
-    mProxy->GetSessionIdsForKeyId(aSample->mCrypto.mKeyId,
-                                  writer->mCrypto.mSessionIds);
 
     mDecrypts.Put(aSample, new DecryptPromiseRequestHolder());
     mProxy->Decrypt(aSample)
@@ -273,9 +267,6 @@ EMEMediaDataDecoderProxy::Decode(MediaRawData* aSample)
            [self, this](RefPtr<MediaRawData> aSample) {
              mKeyRequest.Complete();
 
-             nsAutoPtr<MediaRawDataWriter> writer(aSample->CreateWriter());
-             mProxy->GetSessionIdsForKeyId(aSample->mCrypto.mKeyId,
-                                           writer->mCrypto.mSessionIds);
              MediaDataDecoderProxy::Decode(aSample)
                ->Then(mTaskQueue, __func__,
                       [self, this](const DecodedData& aResults) {
@@ -357,11 +348,7 @@ EMEDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
     RefPtr<MediaDataDecoderProxy> wrapper =
       CreateDecoderWrapper(mProxy, aParams);
     auto params = GMPVideoDecoderParams(aParams);
-    if (MediaPrefs::EMEChromiumAPIEnabled()) {
-      wrapper->SetProxyTarget(new ChromiumCDMVideoDecoder(params, mProxy));
-    } else {
-      wrapper->SetProxyTarget(new EMEVideoDecoder(mProxy, params));
-    }
+    wrapper->SetProxyTarget(new ChromiumCDMVideoDecoder(params, mProxy));
     return wrapper.forget();
   }
 

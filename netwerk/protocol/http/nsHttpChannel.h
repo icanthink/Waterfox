@@ -31,6 +31,7 @@
 #include "AlternateServices.h"
 #include "nsIHstsPrimingCallback.h"
 #include "nsIRaceCacheWithNetwork.h"
+#include "mozilla/extensions/PStreamFilterParent.h"
 
 class nsDNSPrefetch;
 class nsICancelable;
@@ -141,7 +142,7 @@ public:
                                        uint64_t aChannelId) override;
 
     MOZ_MUST_USE nsresult OnPush(const nsACString &uri,
-                                 Http2PushedStream *pushedStream);
+                                 Http2PushedStreamWrapper *pushedStream);
 
     static bool IsRedirectStatus(uint32_t status);
     static bool WillRedirect(nsHttpResponseHead * response);
@@ -290,6 +291,10 @@ public: /* internal necko use only */
     // Should only be called on the same thread as ODA.
     bool IsReadingFromCache() const { return mIsReadingFromCache; }
 
+    base::ProcessId ProcessId();
+
+    MOZ_MUST_USE bool AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint);
+
 private: // used for alternate service validation
     RefPtr<TransactionObserver> mTransactionObserver;
 public:
@@ -319,6 +324,8 @@ private:
     MOZ_MUST_USE nsresult BeginConnectContinue();
     MOZ_MUST_USE nsresult ContinueBeginConnectWithResult();
     void     ContinueBeginConnect();
+    MOZ_MUST_USE nsresult OnBeforeConnect();
+    void     OnBeforeConnectContinue();
     MOZ_MUST_USE nsresult Connect();
     void     SpeculativeConnect();
     MOZ_MUST_USE nsresult SetupTransaction();
@@ -501,7 +508,7 @@ private:
                                                bool startBuffering,
                                                bool checkingAppCacheEntry);
 
-    void SetPushedStream(Http2PushedStream *stream);
+    void SetPushedStream(Http2PushedStreamWrapper *stream);
 
     void MaybeWarnAboutAppCache();
 
@@ -661,7 +668,7 @@ private:
     // Needed for accurate DNS timing
     RefPtr<nsDNSPrefetch>           mDNSPrefetch;
 
-    Http2PushedStream                 *mPushedStream;
+    RefPtr<Http2PushedStreamWrapper> mPushedStream;
     // True if the channel's principal was found on a phishing, malware, or
     // tracking (if tracking protection is enabled) blocklist
     bool                              mLocalBlocklist;

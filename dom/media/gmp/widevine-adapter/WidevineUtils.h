@@ -8,8 +8,6 @@
 
 #include "stddef.h"
 #include "content_decryption_module.h"
-#include "gmp-api/gmp-decryption.h"
-#include "gmp-api/gmp-platform.h"
 #include "nsISupportsImpl.h"
 #include "nsTArray.h"
 #include "mozilla/Logging.h"
@@ -32,31 +30,6 @@ namespace mozilla {
       return rv;                                                               \
     }                                                                          \
   }
-
-GMPErr
-ToGMPErr(cdm::Status aStatus);
-
-class WidevineDecryptor;
-
-class CDMWrapper {
-public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CDMWrapper)
-
-  explicit CDMWrapper(cdm::ContentDecryptionModule_8* aCDM,
-                      WidevineDecryptor* aDecryptor);
-  cdm::ContentDecryptionModule_8* GetCDM() const { return mCDM; }
-private:
-  ~CDMWrapper();
-  cdm::ContentDecryptionModule_8* mCDM;
-  RefPtr<WidevineDecryptor> mDecryptor;
-};
-
-void InitInputBuffer(const GMPEncryptedBufferMetadata* aCrypto,
-                     int64_t aTimestamp,
-                     const uint8_t* aData,
-                     size_t aDataSize,
-                     cdm::InputBuffer &aInputBuffer,
-                     nsTArray<cdm::SubsampleEntry> &aSubsamples);
 
 namespace gmp {
 class CDMShmemBuffer;

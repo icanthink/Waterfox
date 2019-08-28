@@ -430,46 +430,44 @@ nsHttpConnectionMgr::PruneDeadConnections()
 //
 // Called after a timeout. Check for active connections that have had no
 // traffic since they were "marked" and nuke them.
-nsresult
-nsHttpConnectionMgr::PruneNoTraffic()
-{
-    LOG(("nsHttpConnectionMgr::PruneNoTraffic\n"));
-    mPruningNoTraffic = true;
-    return PostEvent(&nsHttpConnectionMgr::OnMsgPruneNoTraffic);
+nsresult nsHttpConnectionMgr::PruneNoTraffic() {
+  LOG(("nsHttpConnectionMgr::PruneNoTraffic\n"));
+  mPruningNoTraffic = true;
+  return PostEvent(&nsHttpConnectionMgr::OnMsgPruneNoTraffic);
 }
 
-nsresult
-nsHttpConnectionMgr::VerifyTraffic()
-{
-    LOG(("nsHttpConnectionMgr::VerifyTraffic\n"));
-    return PostEvent(&nsHttpConnectionMgr::OnMsgVerifyTraffic);
+nsresult nsHttpConnectionMgr::VerifyTraffic() {
+  LOG(("nsHttpConnectionMgr::VerifyTraffic\n"));
+  return PostEvent(&nsHttpConnectionMgr::OnMsgVerifyTraffic);
 }
 
-nsresult
-nsHttpConnectionMgr::DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *aCI)
-{
-    return PostEvent(&nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup,
-                     0, aCI);
+nsresult nsHttpConnectionMgr::DoShiftReloadConnectionCleanup(
+    nsHttpConnectionInfo *aCI) {
+  RefPtr<nsHttpConnectionInfo> ci;
+  if (aCI) {
+    ci = aCI->Clone();
+  }
+  return PostEvent(&nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup, 0,
+                   ci);
 }
 
-class SpeculativeConnectArgs : public ARefBase
-{
-public:
-    SpeculativeConnectArgs() { mOverridesOK = false; }
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SpeculativeConnectArgs)
+class SpeculativeConnectArgs : public ARefBase {
+ public:
+  SpeculativeConnectArgs() { mOverridesOK = false; }
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SpeculativeConnectArgs, override)
 
-public: // intentional!
-    RefPtr<NullHttpTransaction> mTrans;
+ public:  // intentional!
+  RefPtr<NullHttpTransaction> mTrans;
 
-    bool mOverridesOK;
-    uint32_t mParallelSpeculativeConnectLimit;
-    bool mIgnoreIdle;
-    bool mIsFromPredictor;
-    bool mAllow1918;
+  bool mOverridesOK;
+  uint32_t mParallelSpeculativeConnectLimit;
+  bool mIgnoreIdle;
+  bool mIsFromPredictor;
+  bool mAllow1918;
 
-private:
-    virtual ~SpeculativeConnectArgs() {}
-    NS_DECL_OWNINGTHREAD
+ private:
+  virtual ~SpeculativeConnectArgs() {}
+  NS_DECL_OWNINGTHREAD
 };
 
 nsresult
@@ -578,11 +576,13 @@ nsHttpConnectionMgr::UpdateParam(nsParamName name, uint16_t value)
                      static_cast<int32_t>(param), nullptr);
 }
 
-nsresult
-nsHttpConnectionMgr::ProcessPendingQ(nsHttpConnectionInfo *ci)
-{
-    LOG(("nsHttpConnectionMgr::ProcessPendingQ [ci=%s]\n", ci->HashKey().get()));
-    return PostEvent(&nsHttpConnectionMgr::OnMsgProcessPendingQ, 0, ci);
+nsresult nsHttpConnectionMgr::ProcessPendingQ(nsHttpConnectionInfo* aCI) {
+  LOG(("nsHttpConnectionMgr::ProcessPendingQ [ci=%s]\n", aCI->HashKey().get()));
+  RefPtr<nsHttpConnectionInfo> ci;
+  if (aCI) {
+    ci = aCI->Clone();
+  }
+  return PostEvent(&nsHttpConnectionMgr::OnMsgProcessPendingQ, 0, ci);
 }
 
 nsresult
@@ -1805,13 +1805,18 @@ nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction *trans)
 
     trans->SetPendingTime();
 
-    Http2PushedStream *pushedStream = trans->GetPushedStream();
-    if (pushedStream) {
-        LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n",
-             trans, pushedStream->Session()));
-        return pushedStream->Session()->
-            AddStream(trans, trans->Priority(), false, nullptr) ?
-            NS_OK : NS_ERROR_UNEXPECTED;
+    RefPtr<Http2PushedStreamWrapper> pushedStreamWrapper =
+    trans->GetPushedStream();
+    if (pushedStreamWrapper) {
+        Http2PushedStream* pushedStream = pushedStreamWrapper->GetStream();
+        if (pushedStream) {
+            LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n", trans,
+                 pushedStream->Session()));
+            return pushedStream->Session()->AddStream(trans, trans->Priority(), false,
+                                                      nullptr)
+            ? NS_OK
+            : NS_ERROR_UNEXPECTED;
+        }
     }
 
     nsresult rv = NS_OK;

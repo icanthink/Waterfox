@@ -18,6 +18,8 @@
 #include "mozilla/Span.h"
 #include "ReorderQueue.h"
 
+class ChromiumCDMCallback;
+
 namespace mozilla {
 
 class MediaRawData;
@@ -27,20 +29,21 @@ namespace gmp {
 
 class GMPContentParent;
 
-class ChromiumCDMParent final
-  : public PChromiumCDMParent
-  , public GMPCrashHelperHolder
-{
-public:
+class ChromiumCDMParent final : public PChromiumCDMParent,
+                                public GMPCrashHelperHolder {
+ public:
+  typedef MozPromise<bool, MediaResult, /* IsExclusive = */ true> InitPromise;
+
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromiumCDMParent)
 
   ChromiumCDMParent(GMPContentParent* aContentParent, uint32_t aPluginId);
 
   uint32_t PluginId() const { return mPluginId; }
 
-  bool Init(ChromiumCDMProxy* aProxy,
-            bool aAllowDistinctiveIdentifier,
-            bool aAllowPersistentState);
+  RefPtr<InitPromise> Init(ChromiumCDMCallback* aCDMCallback,
+                           bool aAllowDistinctiveIdentifier,
+                           bool aAllowPersistentState,
+                           nsIEventTarget* aMainThread);
 
   void CreateSession(uint32_t aCreateSessionToken,
                      uint32_t aSessionType,
@@ -62,6 +65,9 @@ public:
   void CloseSession(const nsCString& aSessionId, uint32_t aPromiseId);
 
   void RemoveSession(const nsCString& aSessionId, uint32_t aPromiseId);
+
+  void GetStatusForPolicy(uint32_t aPromiseId,
+                          const nsCString& aMinHdcpVersion);
 
   RefPtr<DecryptPromise> Decrypt(MediaRawData* aSample);
 
@@ -87,6 +93,9 @@ protected:
   ~ChromiumCDMParent() {}
 
   ipc::IPCResult Recv__delete__() override;
+  ipc::IPCResult RecvOnResolvePromiseWithKeyStatus(
+    const uint32_t& aPromiseId,
+    const uint32_t& aKeyStatus) override;
   ipc::IPCResult RecvOnResolveNewSessionPromise(
     const uint32_t& aPromiseId,
     const nsCString& aSessionId) override;
@@ -108,12 +117,7 @@ protected:
     const nsCString& aSessionId,
     const double& aSecondsSinceEpoch) override;
   ipc::IPCResult RecvOnSessionClosed(const nsCString& aSessionId) override;
-  ipc::IPCResult RecvOnLegacySessionError(const nsCString& aSessionId,
-                                          const uint32_t& aError,
-                                          const uint32_t& aSystemCode,
-                                          const nsCString& aMessage) override;
-  ipc::IPCResult RecvDecrypted(const uint32_t& aId,
-                               const uint32_t& aStatus,
+  ipc::IPCResult RecvDecrypted(const uint32_t& aId, const uint32_t& aStatus,
                                ipc::Shmem&& aData) override;
   ipc::IPCResult RecvDecryptFailed(const uint32_t& aId,
                                    const uint32_t& aStatus) override;
@@ -147,12 +151,13 @@ protected:
 
   const uint32_t mPluginId;
   GMPContentParent* mContentParent;
-  // Note: this pointer is a weak reference because otherwise it would cause
-  // a cycle, as ChromiumCDMProxy has a strong reference to the
-  // ChromiumCDMParent.
-  ChromiumCDMProxy* mProxy = nullptr;
+  // Note: this pointer is a weak reference as ChromiumCDMProxy has a strong reference to the
+  // ChromiumCDMCallback.
+  ChromiumCDMCallback* mCDMCallback = nullptr;
   nsDataHashtable<nsUint32HashKey, uint32_t> mPromiseToCreateSessionToken;
   nsTArray<RefPtr<DecryptJob>> mDecrypts;
+
+  MozPromiseHolder<InitPromise> mInitPromise;
 
   MozPromiseHolder<MediaDataDecoder::InitPromise> mInitVideoDecoderPromise;
   MozPromiseHolder<MediaDataDecoder::DecodePromise> mDecodePromise;
@@ -170,12 +175,11 @@ protected:
   uint32_t mVideoShmemsActive = 0;
   // Maximum number of shmems to use to return decoded video frames.
   uint32_t mVideoShmemLimit;
-  // High water mark for mVideoShmemsActive, reported via telemetry.
-  uint32_t mMaxVideoShmemsActive = 0;
 
   bool mIsShutdown = false;
   bool mVideoDecoderInitialized = false;
   bool mActorDestroyed = false;
+  bool mAbnormalShutdown = false;
 
   // The H.264 decoder in Widevine CDM versions 970 and later output in decode
   // order rather than presentation order, so we reorder in presentation order
